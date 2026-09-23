@@ -94,8 +94,10 @@ class Gmail:
         msg = EmailMessage()
         msg["To"] = recipient
         msg["From"] = self.me
-        subject = to.subject or "Your document request"
-        msg["Subject"] = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+        # Gmail only threads a reply whose subject matches the original, so never
+        # substitute a placeholder for an empty subject.
+        subject = to.subject.strip()
+        msg["Subject"] = subject if subject.lower().startswith("re:") else f"Re: {subject}".strip()
         if to.message_id:
             msg["In-Reply-To"] = to.message_id
             msg["References"] = f"{to.references} {to.message_id}".strip()
