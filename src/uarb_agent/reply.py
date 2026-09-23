@@ -87,7 +87,17 @@ def summarize_download(r: FetchResult) -> str:
         return f"There are no {r.doc_type} in this matter, so nothing is attached."
     if got == 0:
         return f"I couldn't download any of the {plural(total, r.doc_type)}, so nothing is attached. Please try again later."
-    text = f"I downloaded {got} out of {plural(total, r.doc_type)} and attached them as a ZIP."
+    attached = got - len(r.too_large)
+    text = f"I downloaded {got} out of {plural(total, r.doc_type)}"
+    if not r.too_large:
+        text += " and attached them as a ZIP."
+    elif attached:
+        text += (
+            f". {attached} {'is' if attached == 1 else 'are'} attached as a ZIP; {join_words(r.too_large)} "
+            f"{'was' if len(r.too_large) == 1 else 'were'} too large to fit in the email."
+        )
+    else:
+        text += ", but they were too large to fit in an email, so nothing is attached."
     if r.failed:
         text += f" {r.failed} {'file' if r.failed == 1 else 'files'} failed to download and {'was' if r.failed == 1 else 'were'} skipped."
     return text
@@ -104,3 +114,20 @@ def build_zip(files: list[Path], dest: Path) -> Path:
         for f in files:
             z.write(f, arcname=f.name)
     return dest
+
+
+def fit_zip(files: list[Path], dest: Path, max_bytes: int) -> tuple[Path | None, list[str]]:
+    """Zip as many files as fit under `max_bytes`, dropping the largest first.
+
+    Returns the ZIP (None if nothing fits) and the names of the files left out.
+    """
+    kept = list(files)
+    dropped: list[str] = []
+    while kept:
+        build_zip(kept, dest)
+        if dest.stat().st_size <= max_bytes:
+            return dest, dropped
+        largest = max(kept, key=lambda f: f.stat().st_size)
+        kept.remove(largest)
+        dropped.append(largest.name)
+    return None, dropped

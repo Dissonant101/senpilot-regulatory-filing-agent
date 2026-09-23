@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from uarb_agent.reply import build_zip, compose_body, summarize_counts, summarize_download, summarize_matter
+from uarb_agent.reply import build_zip, compose_body, fit_zip, summarize_counts, summarize_download, summarize_matter
 from uarb_agent.uarb import FetchResult, Matter, _parse_header
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -99,3 +99,29 @@ def test_zip_holds_every_file(tmp_path):
     with zipfile.ZipFile(z) as zf:
         assert zf.testzip() is None
         assert sorted(zf.namelist()) == ["102454.pdf", "102674.pdf"]
+
+
+def test_fit_zip_drops_largest_files_until_it_fits(tmp_path):
+    import os
+
+    small = tmp_path / "small.pdf"
+    small.write_bytes(b"a" * 100)
+    big = tmp_path / "big.pdf"
+    big.write_bytes(os.urandom(50_000))  # random bytes don't compress
+    z, dropped = fit_zip([small, big], tmp_path / "out.zip", max_bytes=10_000)
+    assert dropped == ["big.pdf"]
+    with zipfile.ZipFile(z) as zf:
+        assert zf.namelist() == ["small.pdf"]
+
+    z, dropped = fit_zip([big], tmp_path / "out2.zip", max_bytes=10_000)
+    assert z is None and dropped == ["big.pdf"]
+
+
+def test_download_wording_when_files_too_large(tmp_path):
+    files = [tmp_path / f"{i}.pdf" for i in range(6)]
+    some = FetchResult(m12205(), "Key Documents", files, too_large=["5.pdf"])
+    assert summarize_download(some) == (
+        "I downloaded 6 out of 6 Key Documents. 5 are attached as a ZIP; 5.pdf was too large to fit in the email."
+    )
+    none = FetchResult(m12205(), "Key Documents", files[:1], too_large=["0.pdf"])
+    assert "too large to fit in an email, so nothing is attached" in summarize_download(none)

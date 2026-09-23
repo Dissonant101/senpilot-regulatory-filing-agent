@@ -40,6 +40,7 @@ class FetchResult:
     doc_type: str
     files: list[Path]
     failed: int = 0
+    too_large: list[str] = field(default_factory=list)  # downloaded but left out of the email
 
 
 # Collects every visible text widget above the document tabs with its position.

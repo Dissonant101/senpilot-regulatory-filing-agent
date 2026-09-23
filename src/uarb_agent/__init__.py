@@ -9,13 +9,15 @@ import tempfile
 from pathlib import Path
 
 from .parser import DOC_TYPES, ParseError, parse_request
-from .reply import build_zip, compose_body
+from .reply import compose_body, fit_zip
 from .uarb import MatterNotFound, fetch
 
 log = logging.getLogger("uarb_agent")
 
 MAX_DOCS = 10
 MAX_ATTEMPTS = 3
+# Gmail rejects messages over 25 MB, and base64 encoding inflates attachments by a third.
+MAX_ZIP_BYTES = 18 * 1024 * 1024
 
 
 async def handle(gmail, msg) -> None:
@@ -40,7 +42,9 @@ async def handle(gmail, msg) -> None:
             return
         attachment = None
         if result.files:
-            attachment = build_zip(result.files, Path(tmp) / f"{req.matter} {req.doc_type}.zip")
+            attachment, result.too_large = fit_zip(
+                result.files, Path(tmp) / f"{req.matter} {req.doc_type}.zip", MAX_ZIP_BYTES
+            )
         gmail.reply(msg, req.sender, compose_body(result), attachment)
 
 
