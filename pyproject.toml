@@ -1,0 +1,27 @@
+[project]
+name = "uarb-agent"
+version = "0.1.0"
+description = "Email-driven agent that fetches UARB regulatory filings as a ZIP"
+readme = "README.md"
+authors = [
+    { name = "Dissonant101", email = "92066010+Dissonant101@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "google-api-python-client>=2.200.0",
+    "google-auth-oauthlib>=1.4.1",
+    "playwright>=1.63.0",
+]
+
+[project.scripts]
+uarb-agent = "uarb_agent:main"
+uarb-agent-auth = "uarb_agent.gmail:authorize"
+
+[build-system]
+requires = ["uv_build>=0.12.18,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
