@@ -15,8 +15,9 @@ from googleapiclient.discovery import build
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 # Unread mail stays unread until we've replied, so anything that arrived while the
-# agent was down (or that it crashed on) is picked up on the next poll.
-QUERY = "in:inbox is:unread -from:me"
+# agent was down (or that it crashed on) is picked up on the next poll. Spam is
+# included because Gmail often files a new sender's first request there.
+QUERY = "{in:inbox in:spam} is:unread -from:me"
 
 
 @dataclass
@@ -29,6 +30,7 @@ class Inbound:
     message_id: str
     references: str
     auto: bool  # bounce or auto-reply; never answer these, or two bots can loop
+    spam: bool = False
 
 
 def credentials_from_env() -> Credentials:
@@ -67,7 +69,7 @@ class Gmail:
         self.me = self.api.users().getProfile(userId="me").execute()["emailAddress"]
 
     def unread(self) -> list[Inbound]:
-        resp = self.api.users().messages().list(userId="me", q=QUERY, maxResults=20).execute()
+        resp = self.api.users().messages().list(userId="me", q=QUERY, maxResults=20, includeSpamTrash=True).execute()
         out = []
         # Oldest first, so requests are answered in the order they arrived.
         for ref in reversed(resp.get("messages", [])):
@@ -86,6 +88,7 @@ class Gmail:
                     auto=headers.get("auto-submitted", "no").lower() != "no"
                     or "mailer-daemon" in sender.lower()
                     or "precedence" in headers and headers["precedence"].lower() in ("bulk", "junk", "list"),
+                    spam="SPAM" in msg.get("labelIds", []),
                 )
             )
         return out
@@ -107,8 +110,12 @@ class Gmail:
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
         self.api.users().messages().send(userId="me", body={"raw": raw, "threadId": to.thread_id}).execute()
 
-    def mark_done(self, m: Inbound) -> None:
-        self.api.users().messages().modify(userId="me", id=m.id, body={"removeLabelIds": ["UNREAD"]}).execute()
+    def mark_done(self, m: Inbound, not_spam: bool = False) -> None:
+        body = {"removeLabelIds": ["UNREAD"]}
+        if not_spam:
+            # Moving it to the inbox also teaches Gmail to stop filtering this sender.
+            body = {"removeLabelIds": ["UNREAD", "SPAM"], "addLabelIds": ["INBOX"]}
+        self.api.users().messages().modify(userId="me", id=m.id, body=body).execute()
 
 
 def authorize() -> None:

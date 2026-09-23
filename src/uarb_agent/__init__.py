@@ -20,13 +20,18 @@ MAX_ATTEMPTS = 3
 MAX_ZIP_BYTES = 18 * 1024 * 1024
 
 
-async def handle(gmail, msg) -> None:
+async def handle(gmail, msg) -> bool:
+    """Answer one email. Returns True if it was a real request (worth rescuing from spam)."""
     try:
         req = parse_request(msg.subject, msg.body, msg.sender)
     except ParseError as exc:
+        if msg.spam:
+            # Real spam: replying would confirm the address to spammers.
+            log.info("ignoring spam %s from %s", msg.id, msg.sender)
+            return False
         log.info("rejecting %s: %s", msg.id, exc)
         gmail.reply(msg, msg.sender, f"Hi,\n\n{exc}\n\nExample request: “Other Documents files from M12205”.\n\nRegulatory Filing Agent")
-        return
+        return False
 
     log.info("request %s: %s %s for %s", msg.id, req.matter, req.doc_type, req.sender)
     with tempfile.TemporaryDirectory() as tmp:
@@ -39,13 +44,14 @@ async def handle(gmail, msg) -> None:
                 f"Hi,\n\nI couldn't find matter {req.matter} on the UARB public documents database. "
                 "Please check the number and try again.\n\nRegulatory Filing Agent",
             )
-            return
+            return True
         attachment = None
         if result.files:
             attachment, result.too_large = fit_zip(
                 result.files, Path(tmp) / f"{req.matter} {req.doc_type}.zip", MAX_ZIP_BYTES
             )
         gmail.reply(msg, req.sender, compose_body(result), attachment)
+    return True
 
 
 async def run(poll_seconds: int) -> None:
@@ -57,11 +63,12 @@ async def run(poll_seconds: int) -> None:
     while True:
         try:
             for msg in gmail.unread():
+                is_request = False
                 if msg.auto:
                     log.info("skipping automated message %s from %s", msg.id, msg.sender)
                 else:
                     try:
-                        await handle(gmail, msg)
+                        is_request = await handle(gmail, msg)
                     except Exception:
                         # Leave it unread so the next poll retries (the UARB site is flaky);
                         # give up with an apology after a few tries so one bad email can't wedge the loop.
@@ -76,7 +83,7 @@ async def run(poll_seconds: int) -> None:
                             "Please try again later.\n\nRegulatory Filing Agent",
                         )
                 attempts.pop(msg.id, None)
-                gmail.mark_done(msg)
+                gmail.mark_done(msg, not_spam=msg.spam and is_request)
         except Exception:
             log.exception("poll failed")
         await asyncio.sleep(poll_seconds)
